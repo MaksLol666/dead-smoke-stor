@@ -1,0 +1,76 @@
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy import (
+    BigInteger, String, Integer, Float, Boolean,
+    ForeignKey, DateTime, func
+)
+from datetime import datetime
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class User(Base):
+    __tablename__ = "users"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    username: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    balance: Mapped[float] = mapped_column(Float, default=0.0)
+    referrer_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id"), nullable=True
+    )
+    first_purchase_done: Mapped[bool] = mapped_column(Boolean, default=False)
+    referrals_count: Mapped[int] = mapped_column(Integer, default=0)
+    next_bonus_at: Mapped[int] = mapped_column(Integer, default=10)
+
+
+class Category(Base):
+    __tablename__ = "categories"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(64), unique=True)
+
+
+class Product(Base):
+    __tablename__ = "products"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    category_id: Mapped[int] = mapped_column(ForeignKey("categories.id"))
+    number: Mapped[int] = mapped_column(Integer)
+    brand: Mapped[str] = mapped_column(String(64))
+    flavor: Mapped[str] = mapped_column(String(64))
+    price: Mapped[float] = mapped_column(Float)
+    in_stock: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class CartItem(Base):
+    __tablename__ = "cart_items"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"))
+    reserved: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class Order(Base):
+    __tablename__ = "orders"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger)
+    total: Mapped[float] = mapped_column(Float)
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    promo_codes: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class OrderItem(Base):
+    __tablename__ = "order_items"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"))
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"))
+    price: Mapped[float] = mapped_column(Float)
+
+
+class Promocode(Base):
+    __tablename__ = "promocodes"
+    code: Mapped[str] = mapped_column(String(16), primary_key=True)
+    owner_id: Mapped[int] = mapped_column(BigInteger)          # 0 = общий
+    kind: Mapped[str] = mapped_column(String(8), default="fixed")  # fixed / percent
+    amount: Mapped[float] = mapped_column(Float)
+    used: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_by: Mapped[str] = mapped_column(String(8), default="system")
