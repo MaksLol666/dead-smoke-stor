@@ -51,9 +51,14 @@ def back_to_menu_kb():
 
 def profile_kb(ref_link: str):
     kb = InlineKeyboardBuilder()
+    share_text = (
+        f"{ref_link}\n"
+        f"Dead Smoke Store💨 — перестань ждать ответа администратора по наличию. "
+        f"Всегда весь актуальный ассортимент внутри бота! Не упусти.."
+    )
     kb.button(
         text="📤 Поделиться ссылкой",
-        switch_inline_query=f"💨 Заходи в Dead Smoke Store — лучший вейп-шоп!\n{ref_link}"
+        switch_inline_query=share_text,
     )
     kb.button(text="⬅️ В меню", callback_data="menu:main")
     kb.adjust(1)
