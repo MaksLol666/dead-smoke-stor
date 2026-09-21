@@ -70,7 +70,9 @@ class Promocode(Base):
     __tablename__ = "promocodes"
     code: Mapped[str] = mapped_column(String(16), primary_key=True)
     owner_id: Mapped[int] = mapped_column(BigInteger)          # 0 = общий
-    kind: Mapped[str] = mapped_column(String(8), default="fixed")  # fixed / percent
+    kind: Mapped[str] = mapped_column(String(8), default="fixed")
     amount: Mapped[float] = mapped_column(Float)
     used: Mapped[bool] = mapped_column(Boolean, default=False)
     created_by: Mapped[str] = mapped_column(String(8), default="system")
+    max_uses: Mapped[int] = mapped_column(Integer, default=1)
+    used_count: Mapped[int] = mapped_column(Integer, default=0)
