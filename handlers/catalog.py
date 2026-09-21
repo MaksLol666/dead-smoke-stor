@@ -47,11 +47,30 @@ async def show_category(cb: CallbackQuery):
 @router.callback_query(F.data.startswith("prod:"))
 async def add_to_cart(cb: CallbackQuery):
     product_id = int(cb.data.split(":")[1])
+    user_id = cb.from_user.id
+
     async with SessionLocal() as s:
         product = await s.get(Product, product_id)
         if not product or not product.in_stock:
             await cb.answer("Товар недоступен", show_alert=True)
             return
-        s.add(CartItem(user_id=cb.from_user.id, product_id=product_id, reserved=False))
+
+        # проверяем, уже в корзине?
+        existing = (await s.execute(
+            select(CartItem).where(
+                CartItem.user_id == user_id,
+                CartItem.product_id == product_id,
+            )
+        )).scalar_one_or_none()
+
+        if existing:
+            await cb.answer(
+                f"⚠️ {product.brand} {product.flavor} уже в корзине",
+                show_alert=False,
+            )
+            return
+
+        s.add(CartItem(user_id=user_id, product_id=product_id, reserved=False))
         await s.commit()
+
     await cb.answer(f"✅ {product.brand} {product.flavor} добавлен в корзину")
