@@ -1,3 +1,4 @@
+import asyncio
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery
@@ -20,6 +21,27 @@ def is_admin(uid: int) -> bool:
     return uid == ADMIN_ID
 
 
+async def _auto_delete(bot, chat_id: int, message_id: int, delay: int = 0):
+    if delay:
+        await asyncio.sleep(delay)
+    try:
+        await bot.delete_message(chat_id, message_id)
+    except Exception:
+        pass
+
+
+async def cleanup_messages(bot, chat_id: int, message_ids: list[int]):
+    for mid in message_ids:
+        await _auto_delete(bot, chat_id, mid)
+
+
+async def _delete_user_msg(msg: Message):
+    try:
+        await msg.delete()
+    except Exception:
+        pass
+
+
 @router.message(Command("admin"))
 async def admin_panel(msg: Message):
     if not is_admin(msg.from_user.id):
@@ -38,7 +60,8 @@ async def add_product_start(cb: CallbackQuery, state: FSMContext):
         return
     async with SessionLocal() as s:
         cats = (await s.execute(select(Category).order_by(Category.id))).scalars().all()
-    await cb.message.edit_text("Выбери раздел:", reply_markup=categories_kb(cats))
+    sent = await cb.message.edit_text("Выбери раздел:", reply_markup=categories_kb(cats))
+    await state.update_data(cleanup_ids=[sent.message_id], chat_id=sent.chat.id)
     await state.set_state(AddProduct.category)
 
 
@@ -46,31 +69,51 @@ async def add_product_start(cb: CallbackQuery, state: FSMContext):
 async def add_product_cat(cb: CallbackQuery, state: FSMContext):
     cat_id = int(cb.data.split(":")[1])
     await state.update_data(category_id=cat_id)
-    await cb.message.edit_text("Введи <b>бренд</b> товара:", parse_mode="HTML")
+    sent = await cb.message.edit_text("Введи <b>бренд</b> товара:", parse_mode="HTML")
+    data = await state.get_data()
+    ids = data.get("cleanup_ids", [])
+    ids.append(sent.message_id)
+    await state.update_data(cleanup_ids=ids)
     await state.set_state(AddProduct.brand)
 
 
 @router.message(AddProduct.brand)
 async def add_product_brand(msg: Message, state: FSMContext):
+    await _delete_user_msg(msg)
     await state.update_data(brand=msg.text.strip())
-    await msg.answer("Введи <b>вкус</b> (или вариант):", parse_mode="HTML")
+    sent = await msg.answer("Введи <b>вкус</b> (или вариант):", parse_mode="HTML")
+    data = await state.get_data()
+    ids = data.get("cleanup_ids", [])
+    ids.append(sent.message_id)
+    await state.update_data(cleanup_ids=ids)
     await state.set_state(AddProduct.flavor)
 
 
 @router.message(AddProduct.flavor)
 async def add_product_flavor(msg: Message, state: FSMContext):
+    await _delete_user_msg(msg)
     await state.update_data(flavor=msg.text.strip())
-    await msg.answer("Введи <b>цену</b> (только число, ₽):", parse_mode="HTML")
+    sent = await msg.answer("Введи <b>цену</b> (только число, ₽):", parse_mode="HTML")
+    data = await state.get_data()
+    ids = data.get("cleanup_ids", [])
+    ids.append(sent.message_id)
+    await state.update_data(cleanup_ids=ids)
     await state.set_state(AddProduct.price)
 
 
 @router.message(AddProduct.price)
 async def add_product_price(msg: Message, state: FSMContext):
+    await _delete_user_msg(msg)
     try:
         price = float(msg.text.replace(",", ".").replace("₽", "").strip())
     except ValueError:
-        await msg.answer("❌ Некорректная цена. Введи число:")
+        sent = await msg.answer("❌ Некорректная цена. Введи число:")
+        data = await state.get_data()
+        ids = data.get("cleanup_ids", [])
+        ids.append(sent.message_id)
+        await state.update_data(cleanup_ids=ids)
         return
+
     data = await state.get_data()
     async with SessionLocal() as s:
         max_num = (await s.execute(
@@ -86,7 +129,15 @@ async def add_product_price(msg: Message, state: FSMContext):
         )
         s.add(p)
         await s.commit()
-    await msg.answer(f"✅ Добавлено: {data['brand']} — {data['flavor']} — {int(price)}₽ (№{max_num+1})")
+
+    chat_id = data.get("chat_id") or msg.chat.id
+    await cleanup_messages(msg.bot, chat_id, data.get("cleanup_ids", []))
+
+    final = await msg.answer(
+        f"✅ Добавлено: <b>{data['brand']}</b> — {data['flavor']} — {int(price)}₽ (№{max_num+1})",
+        parse_mode="HTML",
+    )
+    asyncio.create_task(_auto_delete(msg.bot, chat_id, final.message_id, 5))
     await state.clear()
 
 
@@ -97,7 +148,8 @@ async def edit_start(cb: CallbackQuery, state: FSMContext):
         return
     async with SessionLocal() as s:
         cats = (await s.execute(select(Category).order_by(Category.id))).scalars().all()
-    await cb.message.edit_text("Выбери раздел:", reply_markup=categories_kb(cats))
+    sent = await cb.message.edit_text("Выбери раздел:", reply_markup=categories_kb(cats))
+    await state.update_data(cleanup_ids=[sent.message_id], chat_id=sent.chat.id)
     await state.set_state(EditProduct.category)
 
 
@@ -116,18 +168,27 @@ async def edit_cat(cb: CallbackQuery, state: FSMContext):
     text = "Введи номер товара:\n" + "\n".join(
         f"{p.number}. {p.brand} — {p.flavor} — {int(p.price)}₽" for p in products
     )
-    await cb.message.edit_text(text)
+    sent = await cb.message.edit_text(text)
+    data = await state.get_data()
+    ids = data.get("cleanup_ids", [])
+    ids.append(sent.message_id)
+    await state.update_data(cleanup_ids=ids)
     await state.set_state(EditProduct.number)
 
 
 @router.message(EditProduct.number)
 async def edit_number(msg: Message, state: FSMContext):
+    await _delete_user_msg(msg)
+    data = await state.get_data()
     try:
         num = int(msg.text.strip())
     except ValueError:
-        await msg.answer("Введи число.")
+        sent = await msg.answer("Введи число.")
+        ids = data.get("cleanup_ids", [])
+        ids.append(sent.message_id)
+        await state.update_data(cleanup_ids=ids)
         return
-    data = await state.get_data()
+
     async with SessionLocal() as s:
         p = (await s.execute(
             select(Product).where(
@@ -135,15 +196,25 @@ async def edit_number(msg: Message, state: FSMContext):
             )
         )).scalar_one_or_none()
     if not p:
-        await msg.answer("Товар не найден.")
+        sent = await msg.answer("Товар не найден.")
+        ids = data.get("cleanup_ids", [])
+        ids.append(sent.message_id)
+        await state.update_data(cleanup_ids=ids)
         return
+
     await state.update_data(product_id=p.id)
     kb = InlineKeyboardBuilder()
     kb.button(text="Бренд", callback_data="editfield:brand")
     kb.button(text="Вкус", callback_data="editfield:flavor")
     kb.button(text="Цена", callback_data="editfield:price")
     kb.adjust(1)
-    await msg.answer(f"Что меняем у «{p.brand} — {p.flavor}»?", reply_markup=kb.as_markup())
+    sent = await msg.answer(
+        f"Что меняем у «{p.brand} — {p.flavor}»?",
+        reply_markup=kb.as_markup()
+    )
+    ids = data.get("cleanup_ids", [])
+    ids.append(sent.message_id)
+    await state.update_data(cleanup_ids=ids)
     await state.set_state(EditProduct.field)
 
 
@@ -152,12 +223,17 @@ async def edit_field(cb: CallbackQuery, state: FSMContext):
     field = cb.data.split(":")[1]
     await state.update_data(field=field)
     label = {"brand": "бренд", "flavor": "вкус", "price": "цену"}[field]
-    await cb.message.edit_text(f"Введи новый {label}:")
+    sent = await cb.message.edit_text(f"Введи новый {label}:")
+    data = await state.get_data()
+    ids = data.get("cleanup_ids", [])
+    ids.append(sent.message_id)
+    await state.update_data(cleanup_ids=ids)
     await state.set_state(EditProduct.value)
 
 
 @router.message(EditProduct.value)
 async def edit_value(msg: Message, state: FSMContext):
+    await _delete_user_msg(msg)
     data = await state.get_data()
     field = data["field"]
     value = msg.text.strip()
@@ -165,13 +241,22 @@ async def edit_value(msg: Message, state: FSMContext):
         try:
             value = float(value.replace(",", ".").replace("₽", ""))
         except ValueError:
-            await msg.answer("Введи число.")
+            sent = await msg.answer("Введи число.")
+            ids = data.get("cleanup_ids", [])
+            ids.append(sent.message_id)
+            await state.update_data(cleanup_ids=ids)
             return
+
     async with SessionLocal() as s:
         p = await s.get(Product, data["product_id"])
         setattr(p, field, value)
         await s.commit()
-    await msg.answer(f"✅ Обновлено: {p.brand} — {p.flavor} — {int(p.price)}₽")
+
+    chat_id = data.get("chat_id", msg.chat.id)
+    await cleanup_messages(msg.bot, chat_id, data.get("cleanup_ids", []))
+
+    final = await msg.answer(f"✅ Обновлено: {p.brand} — {p.flavor} — {int(p.price)}₽")
+    asyncio.create_task(_auto_delete(msg.bot, chat_id, final.message_id, 5))
     await state.clear()
 
 
@@ -182,7 +267,8 @@ async def del_product_start(cb: CallbackQuery, state: FSMContext):
         return
     async with SessionLocal() as s:
         cats = (await s.execute(select(Category).order_by(Category.id))).scalars().all()
-    await cb.message.edit_text("Выбери раздел:", reply_markup=categories_kb(cats))
+    sent = await cb.message.edit_text("Выбери раздел:", reply_markup=categories_kb(cats))
+    await state.update_data(cleanup_ids=[sent.message_id], chat_id=sent.chat.id)
     await state.set_state(DelProduct.category)
 
 
@@ -201,18 +287,28 @@ async def del_product_cat(cb: CallbackQuery, state: FSMContext):
     text = "Введи номер товара для удаления:\n" + "\n".join(
         f"{p.number}. {p.brand} — {p.flavor} — {int(p.price)}₽" for p in products
     )
-    await cb.message.edit_text(text)
+    sent = await cb.message.edit_text(text)
+    data = await state.get_data()
+    ids = data.get("cleanup_ids", [])
+    ids.append(sent.message_id)
+    await state.update_data(cleanup_ids=ids)
     await state.set_state(DelProduct.number)
 
 
 @router.message(DelProduct.number)
 async def del_product_number(msg: Message, state: FSMContext):
+    await _delete_user_msg(msg)
+    data = await state.get_data()
     try:
         num = int(msg.text.strip())
     except ValueError:
-        await msg.answer("Введи число.")
+        sent = await msg.answer("Введи число.")
+        ids = data.get("cleanup_ids", [])
+        ids.append(sent.message_id)
+        await state.update_data(cleanup_ids=ids)
         return
-    data = await state.get_data()
+
+    chat_id = data.get("chat_id", msg.chat.id)
     async with SessionLocal() as s:
         p = (await s.execute(
             select(Product).where(
@@ -220,11 +316,17 @@ async def del_product_number(msg: Message, state: FSMContext):
             )
         )).scalar_one_or_none()
         if not p:
-            await msg.answer("Товар не найден.")
+            await cleanup_messages(msg.bot, chat_id, data.get("cleanup_ids", []))
+            final = await msg.answer("Товар не найден.")
+            asyncio.create_task(_auto_delete(msg.bot, chat_id, final.message_id, 3))
+            await state.clear()
             return
         await s.delete(p)
         await s.commit()
-    await msg.answer(f"🗑 Удалён товар №{num}.")
+
+    await cleanup_messages(msg.bot, chat_id, data.get("cleanup_ids", []))
+    final = await msg.answer(f"🗑 Удалён товар №{num}.")
+    asyncio.create_task(_auto_delete(msg.bot, chat_id, final.message_id, 5))
     await state.clear()
 
 
@@ -255,9 +357,8 @@ async def process_order(cb: CallbackQuery):
                 await s.delete(p)
             buyer.balance = (buyer.balance or 0) + order.total
 
-            # === РЕФЕРАЛЬНАЯ ЛОГИКА (только при первой покупке) ===
+            # === РЕФЕРАЛЬНАЯ ЛОГИКА ===
             if buyer.referrer_id and not buyer.first_purchase_done:
-                # 1) 15% промокод рефереру от суммы
                 bonus = round(order.total * 0.15, 2)
                 code = gen_promo()
                 while await s.get(Promocode, code):
@@ -270,12 +371,10 @@ async def process_order(cb: CallbackQuery):
                     created_by="ref",
                 ))
 
-                # 2) инкремент счётчика купивших рефералов
                 ref_user = await s.get(User, buyer.referrer_id)
                 if ref_user:
                     ref_user.referrals_count += 1
 
-                    # 3) milestone каждые N купивших
                     if ref_user.referrals_count >= ref_user.next_bonus_at:
                         milestone_code = gen_promo()
                         while await s.get(Promocode, milestone_code):
@@ -300,7 +399,6 @@ async def process_order(cb: CallbackQuery):
                         except Exception:
                             pass
 
-                    # 4) уведомление о 15% бонусе
                     try:
                         await cb.bot.send_message(
                             buyer.referrer_id,
@@ -314,12 +412,14 @@ async def process_order(cb: CallbackQuery):
 
                 buyer.first_purchase_done = True
 
-            # Списываем использованные промокоды
+            # списание использованных промо
             if order.promo_codes:
                 for pc in order.promo_codes.split(","):
                     promo = await s.get(Promocode, pc)
                     if promo:
-                        promo.used = True
+                        promo.used_count += 1
+                        if promo.used_count >= promo.max_uses:
+                            promo.used = True
 
             await cb.bot.send_message(
                 buyer.id,
@@ -329,6 +429,7 @@ async def process_order(cb: CallbackQuery):
                 cb.message.html_text + "\n\n✅ <b>Подтверждён</b>",
                 parse_mode="HTML"
             )
+            asyncio.create_task(_auto_delete(cb.bot, cb.message.chat.id, cb.message.message_id, 3))
 
         else:  # reject
             order.status = "rejected"
@@ -342,5 +443,6 @@ async def process_order(cb: CallbackQuery):
                 cb.message.html_text + "\n\n❌ <b>Отклонён</b>",
                 parse_mode="HTML"
             )
+            asyncio.create_task(_auto_delete(cb.bot, cb.message.chat.id, cb.message.message_id, 3))
 
         await s.commit()
