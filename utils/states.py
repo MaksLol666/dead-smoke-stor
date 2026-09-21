@@ -27,6 +27,7 @@ class PromoEnter(StatesGroup):
 class PromoCreate(StatesGroup):
     kind = State()
     amount = State()
+    uses = State()
     custom_code = State()
 
 
