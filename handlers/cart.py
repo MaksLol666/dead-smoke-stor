@@ -4,7 +4,7 @@ from sqlalchemy import select, delete
 from database.db import SessionLocal
 from database.models import CartItem, Product, Order, OrderItem, User
 from keyboards.inline import cart_kb, admin_order_kb
-from utils.promo_cache import get_applied, clear_applied
+from utils.promo_cache import get_applied, clear_applied, set_cart_message, get_cart_message
 from utils.pricing import calc_discount
 from config import ADMIN_ID
 
@@ -31,16 +31,8 @@ async def render_cart(user_id: int):
     return rows, subtotal, final, percent, fixed, applied
 
 
-@router.callback_query(F.data == "cart:view")
-async def view_cart(cb: CallbackQuery):
-    res = await render_cart(cb.from_user.id)
-    if not res:
-        await cb.message.edit_text("🛒 Корзина пуста.", reply_markup=cart_kb(False))
-        return
-
-    rows, subtotal, final, percent, fixed, applied = res
+def _render_cart_text(rows, subtotal, final, percent, fixed):
     lines = [f"• {p.brand} — {p.flavor} — {int(p.price)}₽" for _, p in rows]
-
     text = "🛒 <b>Корзина:</b>\n" + "\n".join(lines)
     text += f"\n\nПодытог: {int(subtotal)}₽"
     if percent:
@@ -48,7 +40,53 @@ async def view_cart(cb: CallbackQuery):
     if fixed:
         text += f"\n🎟 Промокоды: −{int(fixed)}₽"
     text += f"\n\n<b>К оплате: {int(final)}₽</b>"
+    return text
 
+
+async def refresh_cart_message(bot, user_id: int):
+    """Перерисовывает сохранённое сообщение корзины."""
+    stored = get_cart_message(user_id)
+    if not stored:
+        return
+    chat_id, message_id = stored
+
+    res = await render_cart(user_id)
+    if not res:
+        try:
+            await bot.edit_message_text(
+                "🛒 Корзина пуста.",
+                chat_id=chat_id,
+                message_id=message_id,
+                reply_markup=cart_kb(False),
+            )
+        except Exception:
+            pass
+        return
+
+    rows, subtotal, final, percent, fixed, applied = res
+    text = _render_cart_text(rows, subtotal, final, percent, fixed)
+    try:
+        await bot.edit_message_text(
+            text,
+            chat_id=chat_id,
+            message_id=message_id,
+            reply_markup=cart_kb(True),
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+
+
+@router.callback_query(F.data == "cart:view")
+async def view_cart(cb: CallbackQuery):
+    set_cart_message(cb.from_user.id, cb.message.chat.id, cb.message.message_id)
+    res = await render_cart(cb.from_user.id)
+    if not res:
+        await cb.message.edit_text("🛒 Корзина пуста.", reply_markup=cart_kb(False))
+        return
+
+    rows, subtotal, final, percent, fixed, applied = res
+    text = _render_cart_text(rows, subtotal, final, percent, fixed)
     await cb.message.edit_text(text, reply_markup=cart_kb(True), parse_mode="HTML")
 
 
@@ -109,4 +147,4 @@ async def checkout(cb: CallbackQuery):
         f"✅ Заказ №{order.id} отправлен администратору.\nК оплате: <b>{int(final)}₽</b>\nОжидайте подтверждения.",
         reply_markup=cart_kb(False),
         parse_mode="HTML",
-  )
+    )
