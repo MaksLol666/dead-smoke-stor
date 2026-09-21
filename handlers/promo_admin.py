@@ -59,6 +59,21 @@ async def promo_amount(msg: Message, state: FSMContext):
         await msg.answer("Процент не может быть больше 100.")
         return
     await state.update_data(amount=val)
+    await msg.answer("Сколько активаций у промокода? (число, например 1 или 100):")
+    await state.set_state(PromoCreate.uses)
+
+
+@router.message(PromoCreate.uses)
+async def promo_uses(msg: Message, state: FSMContext):
+    try:
+        uses = int(msg.text.strip())
+    except ValueError:
+        await msg.answer("Введи целое число.")
+        return
+    if uses < 1:
+        await msg.answer("Минимум 1 активация.")
+        return
+    await state.update_data(max_uses=uses)
     await msg.answer(
         "Введи свой код (латиница + цифры, до 16 символов)\n"
         "или отправь <code>auto</code> — сгенерирую сам.",
@@ -91,6 +106,8 @@ async def promo_code(msg: Message, state: FSMContext):
             owner_id=0,
             kind=data["kind"],
             amount=data["amount"],
+            max_uses=data["max_uses"],
+            used_count=0,
             created_by="admin",
         ))
         await s.commit()
@@ -99,7 +116,8 @@ async def promo_code(msg: Message, state: FSMContext):
     await msg.answer(
         f"✅ Промокод создан!\n\n"
         f"🎫 Код: <code>{code}</code>\n"
-        f"💰 Скидка: <b>{int(data['amount'])}{sign}</b>\n\n"
+        f"💰 Скидка: <b>{int(data['amount'])}{sign}</b>\n"
+        f"🔢 Активаций: <b>{data['max_uses']}</b>\n\n"
         f"Работает для всех пользователей.",
         parse_mode="HTML"
     )
@@ -121,8 +139,10 @@ async def all_promos(msg: Message):
     by_src = {"admin": [], "system": [], "ref": []}
     for p in promos:
         sign = "₽" if p.kind == "fixed" else "%"
+        uses_left = p.max_uses - p.used_count
         by_src.setdefault(p.created_by, []).append(
-            f"<code>{p.code}</code> — {int(p.amount)}{sign} (owner: {p.owner_id})"
+            f"<code>{p.code}</code> — {int(p.amount)}{sign} "
+            f"(осталось: {uses_left}/{p.max_uses}, owner: {p.owner_id})"
         )
 
     text = "🎫 <b>Активные промокоды:</b>\n"
