@@ -7,9 +7,10 @@ def main_menu_kb():
     kb.button(text="🛒 Корзина", callback_data="cart:view")
     kb.button(text="👤 Мой профиль", callback_data="profile:show")
     kb.button(text="📜 История заказов", callback_data="history:show")
-    kb.button(text="🏆 Топ-3", callback_data="top:show")
+    kb.button(text="🏆 Топ-10 покупателей", callback_data="top:show")
+    kb.button(text="👥 Топ реферов", callback_data="topref:show")
     kb.button(text="🎟 Мои промо", callback_data="promo:mine")
-    kb.adjust(2, 2, 2)
+    kb.adjust(2, 2, 2, 1)
     return kb.as_markup()
 
 
