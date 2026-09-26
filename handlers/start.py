@@ -69,4 +69,4 @@ async def back_to_menu(cb):
         "💨 <b>Dead Smoke Store</b>\n\nГлавное меню:",
         reply_markup=main_menu_kb(),
         parse_mode="HTML",
-  )
+                             )
