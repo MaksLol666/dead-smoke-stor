@@ -39,8 +39,11 @@ async def show_category(cb: CallbackQuery):
         await cb.answer("В этом разделе пока пусто", show_alert=True)
         return
 
+    # пустая строка между товарами — для читаемости
     lines = [f"{p.number}. {p.brand} — {p.flavor} — {int(p.price)}₽" for p in products]
-    text = f"📂 <b>{cat.name}</b>\n\n" + "\n".join(lines) + "\n\nНажми номер, чтобы добавить в корзину."
+    body = "\n\n".join(lines)
+
+    text = f"📂 <b>{cat.name}</b>\n\n{body}\n\nНажми номер, чтобы добавить в корзину."
     await cb.message.edit_text(text, reply_markup=products_kb(products), parse_mode="HTML")
 
 
