@@ -1,12 +1,14 @@
-import asyncio, logging, time
+import asyncio
+import logging
+
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.client.default import DefaultBotProperties
+from sqlalchemy import select
 
 from config import BOT_TOKEN, CATEGORIES
 from database.db import init_db, SessionLocal
 from database.models import Category
-from sqlalchemy import select
 
 from handlers import (
     start, catalog, cart, admin, promocodes,
@@ -38,6 +40,7 @@ async def main():
     )
     dp = Dispatcher(storage=MemoryStorage())
 
+    # Порядок важен: admin первым (ловит callback'и, которые могут конфликтовать с другими)
     dp.include_router(admin.router)
     dp.include_router(start.router)
     dp.include_router(catalog.router)
@@ -59,12 +62,7 @@ async def main():
 
 
 if __name__ == "__main__":
-    while True:
-        try:
-            asyncio.run(main())
-        except (KeyboardInterrupt, SystemExit):
-            log.info("Остановлено вручную")
-            break
-        except Exception as e:
-            log.exception("Бот упал, перезапуск через 5 сек: %s", e)
-            time.sleep(5)
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        log.info("Остановлено вручную")
