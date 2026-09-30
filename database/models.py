@@ -57,6 +57,12 @@ class Order(Base):
     promo_codes: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
+    # === ДОСТАВКА ===
+    delivery_type: Mapped[str] = mapped_column(String(16), default="pickup")
+    delivery_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    delivery_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    delivery_address: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
 
 class OrderItem(Base):
     __tablename__ = "order_items"
@@ -69,10 +75,22 @@ class OrderItem(Base):
 class Promocode(Base):
     __tablename__ = "promocodes"
     code: Mapped[str] = mapped_column(String(16), primary_key=True)
-    owner_id: Mapped[int] = mapped_column(BigInteger)          # 0 = общий
+    owner_id: Mapped[int] = mapped_column(BigInteger)
     kind: Mapped[str] = mapped_column(String(8), default="fixed")
     amount: Mapped[float] = mapped_column(Float)
     used: Mapped[bool] = mapped_column(Boolean, default=False)
     created_by: Mapped[str] = mapped_column(String(8), default="system")
     max_uses: Mapped[int] = mapped_column(Integer, default=1)
     used_count: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class Review(Base):
+    __tablename__ = "reviews"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger)
+    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), unique=True)
+    rating: Mapped[int] = mapped_column(Integer)
+    text: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    photo_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    has_photo: Mapped[bool] = mapped_column(Boolean, default=False)
+    published_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
