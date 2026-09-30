@@ -15,6 +15,13 @@ def _stars(n: int) -> str:
     return "⭐" * n
 
 
+async def _safe_delete(bot, chat_id: int, message_id: int):
+    try:
+        await bot.delete_message(chat_id, message_id)
+    except Exception:
+        pass
+
+
 @router.callback_query(F.data.startswith("review:write:"))
 async def review_start(cb: CallbackQuery, state: FSMContext):
     order_id = int(cb.data.split(":")[2])
@@ -43,11 +50,12 @@ async def review_start(cb: CallbackQuery, state: FSMContext):
             parse_mode="HTML",
         )
     except Exception:
-        await cb.message.answer(
+        sent = await cb.message.answer(
             "📝 <b>Оцени свой заказ</b>\n\nПоставь оценку от 1 до 5 звёзд:",
             reply_markup=review_rating_kb(order_id),
             parse_mode="HTML",
         )
+        await state.update_data(rating_msg_id=sent.message_id)
 
 
 @router.callback_query(ReviewFlow.rating, F.data.startswith("review:rate:"))
@@ -59,18 +67,29 @@ async def review_rating(cb: CallbackQuery, state: FSMContext):
     await state.update_data(order_id=order_id, rating=rating)
     await state.set_state(ReviewFlow.text)
 
-    await cb.message.edit_text(
+    sent = await cb.message.edit_text(
         f"Ты поставил: <b>{rating} {_stars(rating)}</b>\n\n"
         f"Теперь напиши текст отзыва.\n"
         f"Можно отправить просто текст или фото с подписью.\n\n"
         f"Отправь /cancel, чтобы отменить.",
         parse_mode="HTML",
     )
+    # сохраняем id сообщения с рейтингом, чтобы удалить после отзыва
+    if sent:
+        await state.update_data(rating_msg_id=sent.message_id)
+    else:
+        await state.update_data(rating_msg_id=cb.message.message_id)
 
 
 @router.message(ReviewFlow.text)
 async def review_receive(msg: Message, state: FSMContext):
+    # отмена
     if msg.text and msg.text.strip().lower() == "/cancel":
+        await _safe_delete(msg.bot, msg.chat.id, msg.message_id)
+        data = await state.get_data()
+        rating_msg_id = data.get("rating_msg_id")
+        if rating_msg_id:
+            await _safe_delete(msg.bot, msg.chat.id, rating_msg_id)
         await state.clear()
         await msg.answer("❌ Отзыв отменён.", reply_markup=back_to_menu_kb())
         return
@@ -78,6 +97,7 @@ async def review_receive(msg: Message, state: FSMContext):
     data = await state.get_data()
     order_id = data.get("order_id")
     rating = data.get("rating", 5)
+    rating_msg_id = data.get("rating_msg_id")
 
     text = None
     photo_id = None
@@ -90,10 +110,13 @@ async def review_receive(msg: Message, state: FSMContext):
     elif msg.text:
         text = msg.text
     else:
+        # неподходящий тип — удаляем сообщение юзера и просим заново
+        await _safe_delete(msg.bot, msg.chat.id, msg.message_id)
         await msg.answer("❌ Можно отправить только текст или фото с подписью.")
         return
 
     if not text or len(text.strip()) < 2:
+        await _safe_delete(msg.bot, msg.chat.id, msg.message_id)
         await msg.answer("❌ Слишком короткий отзыв, напиши что-нибудь по-существу.")
         return
 
@@ -104,6 +127,9 @@ async def review_receive(msg: Message, state: FSMContext):
             select(Review).where(Review.order_id == order_id)
         )).scalar_one_or_none()
         if existing:
+            await _safe_delete(msg.bot, msg.chat.id, msg.message_id)
+            if rating_msg_id:
+                await _safe_delete(msg.bot, msg.chat.id, rating_msg_id)
             await msg.answer(
                 "Ты уже оставил отзыв к этому заказу 💚",
                 reply_markup=back_to_menu_kb(),
@@ -122,6 +148,7 @@ async def review_receive(msg: Message, state: FSMContext):
         s.add(review)
         await s.commit()
 
+    # пересылаем в канал ДО удаления сообщения юзера
     try:
         forwarded = await msg.bot.forward_message(
             chat_id=REVIEWS_CHANNEL_ID,
@@ -139,12 +166,20 @@ async def review_receive(msg: Message, state: FSMContext):
         )
     except Exception as e:
         print("Ошибка публикации отзыва:", e)
+        await _safe_delete(msg.bot, msg.chat.id, msg.message_id)
+        if rating_msg_id:
+            await _safe_delete(msg.bot, msg.chat.id, rating_msg_id)
         await msg.answer(
             "⚠️ Не удалось опубликовать отзыв в канал. Админ уже в курсе.",
             reply_markup=back_to_menu_kb(),
         )
         await state.clear()
         return
+
+    # удаляем сообщение юзера и сообщение с рейтингом
+    await _safe_delete(msg.bot, msg.chat.id, msg.message_id)
+    if rating_msg_id:
+        await _safe_delete(msg.bot, msg.chat.id, rating_msg_id)
 
     await msg.answer(
         f"🎉 <b>Спасибо за отзыв!</b>\n\n"
