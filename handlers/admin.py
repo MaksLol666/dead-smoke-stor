@@ -10,7 +10,9 @@ from database.models import Category, Product, Order, OrderItem, User, Promocode
 from config import (
     ADMIN_ID, REFERRAL_MILESTONE, REFERRAL_MILESTONE_DISCOUNT
 )
-from keyboards.inline import categories_kb, admin_menu_kb, admin_order_kb
+from keyboards.inline import (
+    categories_kb, admin_menu_kb, admin_order_kb, review_kb
+)
 from utils.states import AddProduct, EditProduct, DelProduct
 from utils.promo import gen_promo
 
@@ -423,7 +425,9 @@ async def process_order(cb: CallbackQuery):
 
             await cb.bot.send_message(
                 buyer.id,
-                f"✅ Ваш заказ №{order.id} подтверждён! Спасибо за покупку 💚"
+                f"✅ Ваш заказ №{order.id} подтверждён! Спасибо за покупку 💚\n\n"
+                f"Оставь отзыв — это очень помогает нам 💬",
+                reply_markup=review_kb(order.id),
             )
             await cb.message.edit_text(
                 cb.message.html_text + "\n\n✅ <b>Подтверждён</b>",
