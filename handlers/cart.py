@@ -13,6 +13,13 @@ from config import ADMIN_ID, DELIVERY_PRICE
 router = Router()
 
 
+async def _safe_delete(bot, chat_id: int, message_id: int):
+    try:
+        await bot.delete_message(chat_id, message_id)
+    except Exception:
+        pass
+
+
 async def render_cart(user_id: int):
     async with SessionLocal() as s:
         rows = (await s.execute(
@@ -112,18 +119,26 @@ async def checkout_start(cb: CallbackQuery, state: FSMContext):
         return
 
     await state.set_state(Checkout.delivery)
-    await cb.message.answer(
+    sent = await cb.message.answer(
         "🚚 <b>Выбери способ получения:</b>\n\n"
         f"🏠 Самовывоз — бесплатно\n"
         f"🚚 СДЭК — +{DELIVERY_PRICE}₽ (доставка до ПВЗ)",
         reply_markup=delivery_choice_kb(),
         parse_mode="HTML",
     )
+    # сохраняем id сообщения с выбором доставки, чтобы удалить после выбора
+    await state.update_data(delivery_msg_id=sent.message_id, chat_id=sent.chat.id)
 
 
-# ============== САМОВЫВОЗ — сразу оформляем ==============
+# ============== САМОВЫВОЗ ==============
 @router.callback_query(Checkout.delivery, F.data == "delivery:pickup")
 async def checkout_pickup(cb: CallbackQuery, state: FSMContext):
+    # удаляем сообщение с выбором доставки
+    try:
+        await cb.message.delete()
+    except Exception:
+        pass
+
     await state.clear()
     await _finalize_order(
         bot=cb.bot,
@@ -138,68 +153,132 @@ async def checkout_pickup(cb: CallbackQuery, state: FSMContext):
     )
 
 
-# ============== СДЭК — FSM-цепочка ==============
+# ============== СДЭК ==============
 @router.callback_query(Checkout.delivery, F.data == "delivery:cdek")
 async def checkout_cdek(cb: CallbackQuery, state: FSMContext):
+    # удаляем сообщение с выбором доставки
+    try:
+        await cb.message.delete()
+    except Exception:
+        pass
+
     await state.update_data(delivery_type="cdek", delivery_price=DELIVERY_PRICE)
     await state.set_state(Checkout.name)
-    await cb.message.edit_text(
+    sent = await cb.message.answer(
         "🚚 <b>Оформление СДЭК</b>\n\n"
         "Введи <b>ФИО получателя</b>\n"
         "<i>(как в личном кабинете СДЭК — чтобы ты мог отслеживать заказ в приложении)</i>",
         parse_mode="HTML",
     )
+    await state.update_data(prev_bot_msg_id=sent.message_id)
 
 
 @router.message(Checkout.name)
 async def checkout_name(msg: Message, state: FSMContext):
-    name = msg.text.strip()
+    name = msg.text.strip() if msg.text else ""
+
+    # удаляем сообщение юзера
+    await _safe_delete(msg.bot, msg.chat.id, msg.message_id)
+
     if len(name) < 3:
-        await msg.answer("❌ Слишком короткое ФИО. Введи полное ФИО:")
+        sent = await msg.answer("❌ Слишком короткое ФИО. Введи полное ФИО:")
+        data = await state.get_data()
+        old_id = data.get("prev_bot_msg_id")
+        if old_id:
+            await _safe_delete(msg.bot, msg.chat.id, old_id)
+        await state.update_data(prev_bot_msg_id=sent.message_id)
         return
+
+    # удаляем предыдущее сообщение бота
+    data = await state.get_data()
+    old_id = data.get("prev_bot_msg_id")
+    if old_id:
+        await _safe_delete(msg.bot, msg.chat.id, old_id)
+
     await state.update_data(delivery_name=name)
     await state.set_state(Checkout.phone)
-    await msg.answer(
+    sent = await msg.answer(
         "📱 Введи <b>номер телефона</b> получателя:\n"
         "<i>(например, +7 999 123-45-67)</i>",
         parse_mode="HTML",
     )
+    await state.update_data(prev_bot_msg_id=sent.message_id)
 
 
 @router.message(Checkout.phone)
 async def checkout_phone(msg: Message, state: FSMContext):
-    phone = msg.text.strip()
+    phone = msg.text.strip() if msg.text else ""
+    await _safe_delete(msg.bot, msg.chat.id, msg.message_id)
+
     digits = "".join(c for c in phone if c.isdigit())
     if len(digits) < 10:
-        await msg.answer("❌ Некорректный номер. Введи ещё раз:")
+        sent = await msg.answer("❌ Некорректный номер. Введи ещё раз:")
+        data = await state.get_data()
+        old_id = data.get("prev_bot_msg_id")
+        if old_id:
+            await _safe_delete(msg.bot, msg.chat.id, old_id)
+        await state.update_data(prev_bot_msg_id=sent.message_id)
         return
+
+    data = await state.get_data()
+    old_id = data.get("prev_bot_msg_id")
+    if old_id:
+        await _safe_delete(msg.bot, msg.chat.id, old_id)
+
     await state.update_data(delivery_phone=phone)
     await state.set_state(Checkout.city)
-    await msg.answer("🏙 Введи <b>город</b>:", parse_mode="HTML")
+    sent = await msg.answer("🏙 Введи <b>город</b>:", parse_mode="HTML")
+    await state.update_data(prev_bot_msg_id=sent.message_id)
 
 
 @router.message(Checkout.city)
 async def checkout_city(msg: Message, state: FSMContext):
-    city = msg.text.strip()
+    city = msg.text.strip() if msg.text else ""
+    await _safe_delete(msg.bot, msg.chat.id, msg.message_id)
+
     if len(city) < 2:
-        await msg.answer("❌ Слишком короткое название. Введи город:")
+        sent = await msg.answer("❌ Слишком короткое название. Введи город:")
+        data = await state.get_data()
+        old_id = data.get("prev_bot_msg_id")
+        if old_id:
+            await _safe_delete(msg.bot, msg.chat.id, old_id)
+        await state.update_data(prev_bot_msg_id=sent.message_id)
         return
+
+    data = await state.get_data()
+    old_id = data.get("prev_bot_msg_id")
+    if old_id:
+        await _safe_delete(msg.bot, msg.chat.id, old_id)
+
     await state.update_data(delivery_city=city)
     await state.set_state(Checkout.address)
-    await msg.answer(
+    sent = await msg.answer(
         "📍 Введи <b>точный адрес ПВЗ</b> и, если хочешь, ссылку на Яндекс.Карты.\n\n"
         "<i>Например: г. Москва, ул. Ленина 15, ПВЗ СДЭК (https://yandex.ru/maps/...)</i>",
         parse_mode="HTML",
     )
+    await state.update_data(prev_bot_msg_id=sent.message_id)
 
 
 @router.message(Checkout.address)
 async def checkout_address(msg: Message, state: FSMContext):
-    address = msg.text.strip()
+    address = msg.text.strip() if msg.text else ""
+    await _safe_delete(msg.bot, msg.chat.id, msg.message_id)
+
     if len(address) < 5:
-        await msg.answer("❌ Слишком короткий адрес. Введи ещё раз:")
+        sent = await msg.answer("❌ Слишком короткий адрес. Введи ещё раз:")
+        data = await state.get_data()
+        old_id = data.get("prev_bot_msg_id")
+        if old_id:
+            await _safe_delete(msg.bot, msg.chat.id, old_id)
+        await state.update_data(prev_bot_msg_id=sent.message_id)
         return
+
     data = await state.get_data()
+    old_id = data.get("prev_bot_msg_id")
+    if old_id:
+        await _safe_delete(msg.bot, msg.chat.id, old_id)
+
     full_address = f"{data.get('delivery_city', '')}, {address}"
 
     await state.clear()
@@ -287,4 +366,4 @@ async def _finalize_order(
         f"Ожидайте подтверждения.",
         reply_markup=cart_kb(False),
         parse_mode="HTML",
-        )
+                      )
