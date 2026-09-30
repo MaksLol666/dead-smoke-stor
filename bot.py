@@ -4,15 +4,15 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.client.default import DefaultBotProperties
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from config import BOT_TOKEN, CATEGORIES
-from database.db import init_db, SessionLocal
+from database.db import init_db, SessionLocal, engine
 from database.models import Category
 
 from handlers import (
     start, catalog, cart, admin, promocodes,
-    top, profile, history, broadcast, promo_admin, stats
+    top, profile, history, broadcast, promo_admin, stats, reviews
 )
 
 logging.basicConfig(
@@ -20,6 +20,24 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 log = logging.getLogger("dead_smoke")
+
+
+async def run_migrations():
+    """Аккуратно добавляет новые столбцы в существующие таблицы."""
+    migrations = [
+        ("orders", "delivery_type", "TEXT DEFAULT 'pickup'"),
+        ("orders", "delivery_name", "TEXT"),
+        ("orders", "delivery_phone", "TEXT"),
+        ("orders", "delivery_address", "TEXT"),
+    ]
+    async with engine.begin() as conn:
+        for table, column, coltype in migrations:
+            try:
+                await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}"))
+                log.info("Migration: added %s.%s", table, column)
+            except Exception:
+                # столбец уже есть — норм
+                pass
 
 
 async def seed_categories():
@@ -40,7 +58,6 @@ async def main():
     )
     dp = Dispatcher(storage=MemoryStorage())
 
-    # Порядок важен: admin первым (ловит callback'и, которые могут конфликтовать с другими)
     dp.include_router(admin.router)
     dp.include_router(start.router)
     dp.include_router(catalog.router)
@@ -52,8 +69,13 @@ async def main():
     dp.include_router(broadcast.router)
     dp.include_router(promo_admin.router)
     dp.include_router(stats.router)
+    dp.include_router(reviews.router)
 
+    # 1) создаём новые таблицы (reviews)
     await init_db()
+    # 2) добавляем новые столбцы в orders
+    await run_migrations()
+    # 3) сеем категории (если первый запуск)
     await seed_categories()
 
     log.info("💨 Dead Smoke Store запущен, начинаю polling…")
