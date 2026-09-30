@@ -34,3 +34,16 @@ class PromoCreate(StatesGroup):
 class Broadcast(StatesGroup):
     content = State()
     confirm = State()
+
+
+class ReviewFlow(StatesGroup):
+    rating = State()
+    text = State()
+
+
+class Checkout(StatesGroup):
+    delivery = State()
+    name = State()
+    phone = State()
+    city = State()
+    address = State()
