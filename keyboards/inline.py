@@ -81,3 +81,28 @@ def admin_menu_kb():
     kb.button(text="🗑 Удалить товар", callback_data="admin:del_product")
     kb.adjust(1)
     return kb.as_markup()
+
+
+def review_kb(order_id: int):
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📝 Оставить отзыв", callback_data=f"review:write:{order_id}")
+    return kb.as_markup()
+
+
+def review_rating_kb(order_id: int):
+    kb = InlineKeyboardBuilder()
+    kb.button(text="1 ⭐", callback_data=f"review:rate:{order_id}:1")
+    kb.button(text="2 ⭐", callback_data=f"review:rate:{order_id}:2")
+    kb.button(text="3 ⭐", callback_data=f"review:rate:{order_id}:3")
+    kb.button(text="4 ⭐", callback_data=f"review:rate:{order_id}:4")
+    kb.button(text="5 ⭐", callback_data=f"review:rate:{order_id}:5")
+    kb.adjust(5)
+    return kb.as_markup()
+
+
+def delivery_choice_kb():
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🏠 Самовывоз", callback_data="delivery:pickup")
+    kb.button(text="🚚 СДЭК (500₽)", callback_data="delivery:cdek")
+    kb.adjust(1)
+    return kb.as_markup()
