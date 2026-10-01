@@ -21,6 +21,7 @@ class User(Base):
     first_purchase_done: Mapped[bool] = mapped_column(Boolean, default=False)
     referrals_count: Mapped[int] = mapped_column(Integer, default=0)
     next_bonus_at: Mapped[int] = mapped_column(Integer, default=10)
+    is_banned: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class Category(Base):
@@ -57,7 +58,6 @@ class Order(Base):
     promo_codes: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
-    # === ДОСТАВКА ===
     delivery_type: Mapped[str] = mapped_column(String(16), default="pickup")
     delivery_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     delivery_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
