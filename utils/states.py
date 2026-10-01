@@ -47,3 +47,7 @@ class Checkout(StatesGroup):
     phone = State()
     city = State()
     address = State()
+
+
+class UserManage(StatesGroup):
+    waiting_query = State()
