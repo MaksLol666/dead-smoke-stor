@@ -106,3 +106,15 @@ def delivery_choice_kb():
     kb.button(text="🚚 СДЭК (500₽)", callback_data="delivery:cdek")
     kb.adjust(1)
     return kb.as_markup()
+
+
+def user_manage_kb(user_id: int, is_banned: bool):
+    kb = InlineKeyboardBuilder()
+    if is_banned:
+        kb.button(text="✅ Разбанить", callback_data=f"user:unban:{user_id}")
+    else:
+        kb.button(text="🚫 Забанить", callback_data=f"user:ban:{user_id}")
+    kb.button(text="🗑 Обнулить статистику", callback_data=f"user:reset:{user_id}")
+    kb.button(text="❌ Отмена", callback_data="user:cancel")
+    kb.adjust(1)
+    return kb.as_markup()
