@@ -9,10 +9,11 @@ from sqlalchemy import select, text
 from config import BOT_TOKEN, CATEGORIES
 from database.db import init_db, SessionLocal, engine
 from database.models import Category
+from middlewares.ban_check import BanCheckMiddleware
 
 from handlers import (
     start, catalog, cart, admin, promocodes,
-    top, profile, history, broadcast, promo_admin, stats, reviews
+    top, profile, history, broadcast, promo_admin, stats, reviews, user_admin
 )
 
 logging.basicConfig(
@@ -29,6 +30,7 @@ async def run_migrations():
         ("orders", "delivery_name", "TEXT"),
         ("orders", "delivery_phone", "TEXT"),
         ("orders", "delivery_address", "TEXT"),
+        ("users", "is_banned", "INTEGER DEFAULT 0"),
     ]
     async with engine.begin() as conn:
         for table, column, coltype in migrations:
@@ -36,7 +38,6 @@ async def run_migrations():
                 await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}"))
                 log.info("Migration: added %s.%s", table, column)
             except Exception:
-                # столбец уже есть — норм
                 pass
 
 
@@ -58,7 +59,12 @@ async def main():
     )
     dp = Dispatcher(storage=MemoryStorage())
 
+    # регистрируем middleware для проверки бана
+    dp.message.middleware(BanCheckMiddleware())
+    dp.callback_query.middleware(BanCheckMiddleware())
+
     dp.include_router(admin.router)
+    dp.include_router(user_admin.router)
     dp.include_router(start.router)
     dp.include_router(catalog.router)
     dp.include_router(cart.router)
@@ -71,11 +77,8 @@ async def main():
     dp.include_router(stats.router)
     dp.include_router(reviews.router)
 
-    # 1) создаём новые таблицы (reviews)
     await init_db()
-    # 2) добавляем новые столбцы в orders
     await run_migrations()
-    # 3) сеем категории (если первый запуск)
     await seed_categories()
 
     log.info("💨 Dead Smoke Store запущен, начинаю polling…")
