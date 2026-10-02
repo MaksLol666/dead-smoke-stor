@@ -3,12 +3,12 @@ from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select, delete, func
 from database.db import SessionLocal
-from database.models import User, Order, Promocode
+from database.models import User, Order, Promocode, CartItem
 from utils.states import UserManage
 from keyboards.inline import user_manage_kb
-from aiogram.utils.keyboard import InlineKeyboardBuilder
 from config import ADMIN_ID
 
 router = Router()
@@ -35,7 +35,6 @@ async def _build_user_card(user: User) -> str:
     async with SessionLocal() as s:
         orders_count = (await s.execute(
             select(func.count(Order.id)).where(
-                User.id == user.id,
                 Order.user_id == user.id,
                 Order.status == "approved",
             )
@@ -64,11 +63,11 @@ async def _build_user_card(user: User) -> str:
     return text
 
 
+# ======================== /user ========================
 @router.message(Command("user"))
 async def user_command(msg: Message, state: FSMContext):
     if not is_admin(msg.from_user.id):
         return
-    # удаляем команду админа
     await _safe_delete(msg.bot, msg.chat.id, msg.message_id)
 
     sent = await msg.answer("👤 Введи <b>@username</b> или <b>ID</b> пользователя:", parse_mode="HTML")
@@ -96,16 +95,13 @@ async def user_query(msg: Message, state: FSMContext):
         return
 
     query = msg.text.strip() if msg.text else ""
-    # удаляем сообщение админа
     await _safe_delete(msg.bot, msg.chat.id, msg.message_id)
 
-    # удаляем приглашение «Введи @username или ID»
     data = await state.get_data()
     prompt_id = data.get("prompt_msg_id")
     if prompt_id:
         await _safe_delete(msg.bot, msg.chat.id, prompt_id)
 
-    # ищем юзера
     async with SessionLocal() as s:
         if query.startswith("@"):
             username_clean = query[1:]
@@ -130,7 +126,7 @@ async def user_query(msg: Message, state: FSMContext):
     await state.clear()
 
     text = await _build_user_card(user)
-    sent = await msg.answer(
+    await msg.answer(
         text,
         reply_markup=user_manage_kb(user.id, user.is_banned),
         parse_mode="HTML",
@@ -162,7 +158,6 @@ async def user_ban(cb: CallbackQuery):
         user.is_banned = True
         await s.commit()
 
-    # обновляем карточку
     text = await _build_user_card(user)
     try:
         await cb.message.edit_text(
@@ -173,7 +168,6 @@ async def user_ban(cb: CallbackQuery):
     except Exception:
         pass
 
-    # уведомляем юзера (если можем)
     try:
         await cb.bot.send_message(user.id, "❌ Ты заблокирован в этом боте.")
     except Exception:
@@ -222,13 +216,11 @@ async def user_reset(cb: CallbackQuery):
             await cb.answer("Пользователь не найден.", show_alert=True)
             return
 
-        # обнуляем статистику
         user.balance = 0
         user.referrals_count = 0
         user.next_bonus_at = 10
         user.first_purchase_done = False
 
-        # удаляем промокоды юзера
         await s.execute(delete(Promocode).where(Promocode.owner_id == uid))
 
         await s.commit()
@@ -243,6 +235,7 @@ async def user_reset(cb: CallbackQuery):
         )
     except Exception:
         pass
+
 
 # ======================== /wipeusers ========================
 @router.message(Command("wipeusers"))
