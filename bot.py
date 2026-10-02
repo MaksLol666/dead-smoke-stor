@@ -31,6 +31,7 @@ async def run_migrations():
         ("orders", "delivery_phone", "TEXT"),
         ("orders", "delivery_address", "TEXT"),
         ("users", "is_banned", "INTEGER DEFAULT 0"),
+        ("users", "is_unreachable", "INTEGER DEFAULT 0"),
     ]
     async with engine.begin() as conn:
         for table, column, coltype in migrations:
@@ -59,7 +60,6 @@ async def main():
     )
     dp = Dispatcher(storage=MemoryStorage())
 
-    # регистрируем middleware для проверки бана
     dp.message.middleware(BanCheckMiddleware())
     dp.callback_query.middleware(BanCheckMiddleware())
 
