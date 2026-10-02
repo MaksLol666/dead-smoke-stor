@@ -22,6 +22,7 @@ class User(Base):
     referrals_count: Mapped[int] = mapped_column(Integer, default=0)
     next_bonus_at: Mapped[int] = mapped_column(Integer, default=10)
     is_banned: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_unreachable: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class Category(Base):
