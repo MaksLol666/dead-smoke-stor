@@ -242,3 +242,91 @@ async def user_reset(cb: CallbackQuery):
         )
     except Exception:
         pass
+
+# ======================== /wipeusers ========================
+@router.message(Command("wipeusers"))
+async def wipe_users_start(msg: Message):
+    if not is_admin(msg.from_user.id):
+        return
+
+    await _safe_delete(msg.bot, msg.chat.id, msg.message_id)
+
+    async with SessionLocal() as s:
+        total = (await s.execute(select(func.count(User.id)))).scalar() or 0
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Да, удалить всех", callback_data="wipe:confirm")
+    kb.button(text="❌ Отмена", callback_data="wipe:cancel")
+    kb.adjust(1)
+
+    sent = await msg.answer(
+        f"⚠️ <b>Массовое удаление пользователей</b>\n\n"
+        f"Сейчас в БД: <b>{total}</b> юзеров\n"
+        f"Будет удалено: <b>{total - 1}</b> (все, кроме тебя)\n\n"
+        f"<b>Что НЕ трогается:</b>\n"
+        f"• 📦 Товары и категории\n"
+        f"• 📜 История заказов\n"
+        f"• ⭐ Отзывы\n\n"
+        f"<b>Что удалится:</b>\n"
+        f"• 👥 Все юзеры кроме тебя\n"
+        f"• 🛒 Их корзины\n"
+        f"• 🎟 Промокоды удалённых юзеров\n\n"
+        f"Топ-10 и Топ реферов станут пустыми (это норма).",
+        reply_markup=kb.as_markup(),
+        parse_mode="HTML",
+    )
+    asyncio.create_task(_auto_delete(msg.bot, msg.chat.id, sent.message_id, 60))
+
+
+@router.callback_query(F.data == "wipe:cancel")
+async def wipe_cancel(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+    try:
+        await cb.message.delete()
+    except Exception:
+        pass
+    sent = await cb.message.answer("❌ Отменено.")
+    asyncio.create_task(_auto_delete(cb.bot, cb.message.chat.id, sent.message_id, 3))
+
+
+@router.callback_query(F.data == "wipe:confirm")
+async def wipe_confirm(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id):
+        return
+
+    try:
+        await cb.message.delete()
+    except Exception:
+        pass
+
+    await cb.message.answer("⏳ Удаляю юзеров…")
+
+    async with SessionLocal() as s:
+        total_before = (await s.execute(select(func.count(User.id)))).scalar() or 0
+
+        await s.execute(delete(CartItem).where(CartItem.user_id != ADMIN_ID))
+
+        await s.execute(
+            delete(Promocode).where(
+                Promocode.owner_id != ADMIN_ID,
+                Promocode.owner_id != 0,
+            )
+        )
+
+        await s.execute(delete(User).where(User.id != ADMIN_ID))
+
+        await s.commit()
+
+        total_after = (await s.execute(select(func.count(User.id)))).scalar() or 0
+
+    removed = total_before - total_after
+
+    sent = await cb.message.answer(
+        f"✅ <b>Готово!</b>\n\n"
+        f"🗑 Удалено юзеров: <b>{removed}</b>\n"
+        f"👤 Осталось: <b>{total_after}</b> (ты)\n\n"
+        f"Товары, категории, заказы, отзывы — на месте.",
+        parse_mode="HTML",
+    )
+    asyncio.create_task(_auto_delete(cb.bot, cb.message.chat.id, sent.message_id, 10))
